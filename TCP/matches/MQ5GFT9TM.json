@@ -1,0 +1,12 @@
+{
+	"matchId":	"MQ5GFT9TM",
+	"white":	"huy1",
+	"black":	"huy2",
+	"winner":	"DRAW",
+	"reason":	"Draw by agreement",
+	"timestamp":	1766916370,
+	"endTime":	1766916377,
+	"moveCount":	0,
+	"moves":	[],
+	"finalBoard":	"RNBQKBNRPPPPPPPP................................pppppppprnbqkbnr"
+}

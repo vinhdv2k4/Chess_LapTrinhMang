@@ -1,0 +1,12 @@
+{
+	"matchId":	"MF41O97B1",
+	"white":	"huy1",
+	"black":	"huy2",
+	"winner":	"huy1",
+	"reason":	"Opponent resigned",
+	"timestamp":	1766918865,
+	"endTime":	1766918873,
+	"moveCount":	2,
+	"moves":	["E2E4", "E7E5"],
+	"finalBoard":	"RNBQKBNRPPPP.PPP............P.......p...........pppp.ppprnbqkbnr"
+}

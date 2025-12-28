@@ -1,0 +1,373 @@
+"""
+Online Players View for Chess Client
+Shows list of online players and allows sending challenges
+"""
+
+import pygame
+from config import *
+
+
+class OnlinePlayersView:
+    """View for displaying online players and handling challenges"""
+    
+    def __init__(self, screen, network_client, async_handler=None):
+        self.screen = screen
+        self.network = network_client
+        self.async_handler = async_handler
+        self.font_title = pygame.font.Font(FONT_NAME, FONT_SIZE_TITLE)
+        self.font_large = pygame.font.Font(FONT_NAME, FONT_SIZE_LARGE)
+        self.font_medium = pygame.font.Font(FONT_NAME, FONT_SIZE_MEDIUM)
+        self.font_small = pygame.font.Font(FONT_NAME, FONT_SIZE_SMALL)
+        
+        # Session data
+        self.my_username = ""
+        self.my_session_id = ""
+        
+        # Players data
+        self.online_players = []
+        self.selected_player = None
+        self.show_profile_popup = False
+        
+        # UI state
+        self.message = ""
+        self.message_color = COLOR_TEXT_SECONDARY
+        self._should_go_back = False
+        self._should_start_game = False
+        self.game_data = None
+        
+        # Scroll state
+        self.scroll_offset = 0
+        self.max_scroll = 0
+        
+        # UI rectangles
+        self.button_back = pygame.Rect(50, 800, 200, 60)
+        self.button_refresh = pygame.Rect(750, 800, 200, 60)
+        
+        # Player list area
+        self.list_area = pygame.Rect(150, 200, 700, 550)
+        self.player_rects = []
+        
+        # Profile popup
+        self.popup_rect = pygame.Rect(250, 250, 500, 400)
+        self.button_challenge = pygame.Rect(300, 550, 180, 50)
+        self.button_close = pygame.Rect(520, 550, 180, 50)
+        
+    def set_session_data(self, session_data):
+        """Set session data from login"""
+        self.my_username = session_data.get("username", "Player")
+        self.my_session_id = session_data.get("sessionId", "")
+        
+    def load_online_players(self):
+        """Load online players from server"""
+        if not self.network.is_connected():
+            print("[OnlinePlayers] Not connected to server")
+            self.message = "Not connected to server"
+            self.message_color = COLOR_ERROR
+            self.online_players = []
+            return
+        
+        # Send REQUEST_PLAYER_LIST request
+        try:
+            success = self.network.send_message("REQUEST_PLAYER_LIST", {})
+            
+            if not success:
+                print("[OnlinePlayers] Failed to send request")
+                self.message = "Failed to send request"
+                self.message_color = COLOR_ERROR
+                self.online_players = []
+                return
+            
+            # Wait for async_handler to receive response
+            if not self.async_handler:
+                print("[OnlinePlayers] No async handler available")
+                self.message = "No async handler available"
+                self.message_color = COLOR_ERROR
+                self.online_players = []
+                return
+            
+            # Wait up to 5 seconds for response
+            import time
+            timeout = 5.0
+            start_time = time.time()
+            
+            while time.time() - start_time < timeout:
+                data = self.async_handler.get_player_list()
+                if data:
+                    # Parse response
+                    players = data.get("players", [])
+                    print(f"[OnlinePlayers] Received {len(players)} players from server")
+                
+                    # Filter out self and convert status
+                    self.online_players = []
+                    for p in players:
+                        if p.get("username") != self.my_username:
+                            # Convert server status to UI format
+                            status = p.get("status", "ONLINE")
+                            ui_status = "available" if status == "ONLINE" else "in_game"
+                            self.online_players.append({
+                                "username": p["username"],
+                                "status": ui_status,
+                                "wins": 0,  # TODO: Get from server
+                                "losses": 0  # TODO: Get from server
+                            })
+                
+                    self.message = f"Found {len(self.online_players)} players online"
+                    self.message_color = COLOR_SUCCESS
+                    return
+            
+            # Small delay before checking again
+            time.sleep(0.1)
+        
+                # Timeout
+                print("[OnlinePlayers] No response from server (timeout)")
+                self.message = "No response from server"
+                self.message_color = COLOR_ERROR
+                self.online_players = []
+                
+        except Exception as e:
+            print(f"[OnlinePlayers] Error loading players: {e}")
+            self.message = f"Error: {str(e)}"
+            self.message_color = COLOR_ERROR
+            self.online_players = []
+        
+    def handle_event(self, event):
+        """Handle pygame events"""
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mouse_pos = event.pos
+            
+            if self.show_profile_popup:
+                # Handle popup buttons
+                if self.button_challenge.collidepoint(mouse_pos):
+                    self.send_challenge()
+                elif self.button_close.collidepoint(mouse_pos):
+                    self.show_profile_popup = False
+                    self.selected_player = None
+            else:
+                # Handle main view buttons
+                if self.button_back.collidepoint(mouse_pos):
+                    self._should_go_back = True
+                elif self.button_refresh.collidepoint(mouse_pos):
+                    self.load_online_players()
+                    self.message = "Players list refreshed"
+                    self.message_color = COLOR_SUCCESS
+                else:
+                    # Check player list clicks
+                    for i, rect in enumerate(self.player_rects):
+                        if rect.collidepoint(mouse_pos):
+                            self.selected_player = self.online_players[i]
+                            self.show_profile_popup = True
+                            break
+        
+        elif event.type == pygame.MOUSEWHEEL:
+            # Scroll through player list
+            if not self.show_profile_popup:
+                self.scroll_offset -= event.y * 30
+                self.scroll_offset = max(0, min(self.scroll_offset, self.max_scroll))
+    
+    def send_challenge(self):
+        """Send challenge to selected player"""
+        if not self.selected_player:
+            return
+        
+        target_username = self.selected_player["username"]
+        
+        # Send CHALLENGE to server
+        try:
+            success = self.network.send_message("CHALLENGE", {
+                "from": self.my_username,
+                "to": target_username
+            })
+            
+            if success:
+                self.message = f"Challenge sent to {target_username}!"
+                self.message_color = COLOR_SUCCESS
+                print(f"[OnlinePlayers] Challenge sent to {target_username}")
+            else:
+                self.message = "Failed to send challenge"
+                self.message_color = COLOR_ERROR
+                
+        except Exception as e:
+            print(f"[OnlinePlayers] Error sending challenge: {e}")
+            self.message = f"Error: {str(e)}"
+            self.message_color = COLOR_ERROR
+        
+        self.show_profile_popup = False
+        self.selected_player = None
+    
+    def draw(self):
+        """Draw the online players view"""
+        self.screen.fill(COLOR_BACKGROUND)
+        
+        # Title
+        title_text = "Online Players"
+        title_surface = self.font_title.render(title_text, True, COLOR_TEXT)
+        title_rect = title_surface.get_rect(center=(SCREEN_WIDTH // 2, 100))
+        self.screen.blit(title_surface, title_rect)
+        
+        # Player count
+        count_text = f"{len(self.online_players)} players online"
+        count_surface = self.font_small.render(count_text, True, COLOR_TEXT_SECONDARY)
+        count_rect = count_surface.get_rect(center=(SCREEN_WIDTH // 2, 160))
+        self.screen.blit(count_surface, count_rect)
+        
+        # Draw player list
+        self._draw_player_list()
+        
+        # Draw buttons
+        mouse_pos = pygame.mouse.get_pos()
+        self._draw_button(self.button_back, "Back", COLOR_ERROR, mouse_pos)
+        self._draw_button(self.button_refresh, "Refresh", COLOR_BUTTON_PRIMARY, mouse_pos)
+        
+        # Message
+        if self.message:
+            message_surface = self.font_small.render(self.message, True, self.message_color)
+            message_rect = message_surface.get_rect(center=(SCREEN_WIDTH // 2, 750))
+            self.screen.blit(message_surface, message_rect)
+        
+        # Draw popup if active
+        if self.show_profile_popup:
+            self._draw_profile_popup()
+    
+    def _draw_player_list(self):
+        """Draw the scrollable player list"""
+        # Draw list background
+        pygame.draw.rect(self.screen, (50, 50, 50), self.list_area)
+        pygame.draw.rect(self.screen, COLOR_INPUT_BORDER, self.list_area, 2)
+        
+        # Calculate player rectangles
+        self.player_rects = []
+        player_height = 80
+        spacing = 10
+        y_offset = self.list_area.y + 10 - self.scroll_offset
+        
+        mouse_pos = pygame.mouse.get_pos()
+        
+        for i, player in enumerate(self.online_players):
+            player_y = y_offset + i * (player_height + spacing)
+            
+            # Skip if outside visible area
+            if player_y + player_height < self.list_area.y or player_y > self.list_area.bottom:
+                continue
+            
+            player_rect = pygame.Rect(
+                self.list_area.x + 10,
+                player_y,
+                self.list_area.width - 20,
+                player_height
+            )
+            self.player_rects.append(player_rect)
+            
+            # Draw player card
+            hover = player_rect.collidepoint(mouse_pos) and not self.show_profile_popup
+            card_color = (70, 70, 70) if hover else (60, 60, 60)
+            pygame.draw.rect(self.screen, card_color, player_rect, border_radius=8)
+            
+            # Player name
+            name_surface = self.font_medium.render(player["username"], True, COLOR_TEXT)
+            self.screen.blit(name_surface, (player_rect.x + 20, player_rect.y + 10))
+            
+            # Status indicator
+            status_color = COLOR_SUCCESS if player["status"] == "available" else (150, 150, 150)
+            pygame.draw.circle(self.screen, status_color, (player_rect.right - 30, player_rect.centery), 8)
+            
+            # Stats
+            stats_text = f"W:{player['wins']} L:{player['losses']}"
+            stats_surface = self.font_small.render(stats_text, True, COLOR_TEXT_SECONDARY)
+            self.screen.blit(stats_surface, (player_rect.x + 20, player_rect.y + 45))
+        
+        # Calculate max scroll
+        total_height = len(self.online_players) * (player_height + spacing)
+        self.max_scroll = max(0, total_height - self.list_area.height + 20)
+    
+    def _draw_profile_popup(self):
+        """Draw the player profile popup"""
+        if not self.selected_player:
+            return
+        
+        # Semi-transparent overlay
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        overlay.set_alpha(180)
+        overlay.fill((0, 0, 0))
+        self.screen.blit(overlay, (0, 0))
+        
+        # Popup background
+        pygame.draw.rect(self.screen, (40, 40, 40), self.popup_rect, border_radius=15)
+        pygame.draw.rect(self.screen, COLOR_BUTTON_PRIMARY, self.popup_rect, 3, border_radius=15)
+        
+        # Player name
+        name_text = self.selected_player["username"]
+        name_surface = self.font_large.render(name_text, True, COLOR_TEXT)
+        name_rect = name_surface.get_rect(center=(self.popup_rect.centerx, self.popup_rect.y + 80))
+        self.screen.blit(name_surface, name_rect)
+        
+        # Status
+        status_text = f"Status: {self.selected_player['status'].title()}"
+        status_color = COLOR_SUCCESS if self.selected_player['status'] == 'available' else COLOR_TEXT_SECONDARY
+        status_surface = self.font_small.render(status_text, True, status_color)
+        status_rect = status_surface.get_rect(center=(self.popup_rect.centerx, self.popup_rect.y + 140))
+        self.screen.blit(status_surface, status_rect)
+        
+        # Stats
+        wins = self.selected_player["wins"]
+        losses = self.selected_player["losses"]
+        total = wins + losses
+        winrate = (wins / total * 100) if total > 0 else 0
+        
+        stats_y = self.popup_rect.y + 200
+        stats_lines = [
+            f"Wins: {wins}",
+            f"Losses: {losses}",
+            f"Win Rate: {winrate:.1f}%"
+        ]
+        
+        for i, line in enumerate(stats_lines):
+            line_surface = self.font_medium.render(line, True, COLOR_TEXT)
+            line_rect = line_surface.get_rect(center=(self.popup_rect.centerx, stats_y + i * 40))
+            self.screen.blit(line_surface, line_rect)
+        
+        # Buttons
+        mouse_pos = pygame.mouse.get_pos()
+        
+        # Only show Challenge button if player is available
+        if self.selected_player['status'] == 'available':
+            self._draw_button(self.button_challenge, "Challenge", COLOR_SUCCESS, mouse_pos)
+        else:
+            # Show disabled button
+            pygame.draw.rect(self.screen, (80, 80, 80), self.button_challenge, border_radius=8)
+            text_surface = self.font_medium.render("In Game", True, (150, 150, 150))
+            text_rect = text_surface.get_rect(center=self.button_challenge.center)
+            self.screen.blit(text_surface, text_rect)
+        
+        self._draw_button(self.button_close, "Close", COLOR_ERROR, mouse_pos)
+    
+    def _draw_button(self, rect, text, base_color, mouse_pos):
+        """Helper to draw a button with hover effect"""
+        hover_color = tuple(min(c + 30, 255) for c in base_color)
+        color = hover_color if rect.collidepoint(mouse_pos) else base_color
+        
+        pygame.draw.rect(self.screen, color, rect, border_radius=8)
+        
+        text_surface = self.font_medium.render(text, True, COLOR_BUTTON_TEXT)
+        text_rect = text_surface.get_rect(center=rect.center)
+        self.screen.blit(text_surface, text_rect)
+    
+    def should_go_back(self):
+        """Check if should return to menu"""
+        return self._should_go_back
+    
+    def should_start_game(self):
+        """Check if should start game"""
+        return self._should_start_game
+    
+    def get_game_data(self):
+        """Get game session data"""
+        return self.game_data
+    
+    def reset(self):
+        """Reset view state"""
+        self._should_go_back = False
+        self._should_start_game = False
+        self.show_profile_popup = False
+        self.selected_player = None
+        self.message = ""
+        self.scroll_offset = 0

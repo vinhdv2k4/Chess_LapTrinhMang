@@ -1,0 +1,12 @@
+{
+	"matchId":	"MK13469WR",
+	"white":	"huy1",
+	"black":	"huy2",
+	"winner":	"huy1",
+	"reason":	"Opponent resigned",
+	"timestamp":	1766918074,
+	"endTime":	1766918079,
+	"moveCount":	2,
+	"moves":	["D2D4", "D7D5"],
+	"finalBoard":	"RNBQKBNRPPP.PPPP...........P.......p............ppp.pppprnbqkbnr"
+}

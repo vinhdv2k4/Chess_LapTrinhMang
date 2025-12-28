@@ -1,0 +1,12 @@
+{
+	"matchId":	"MVB81N36L",
+	"white":	"huy2",
+	"black":	"huy1",
+	"winner":	"DRAW",
+	"reason":	"Draw by agreement",
+	"timestamp":	1766918878,
+	"endTime":	1766918895,
+	"moveCount":	2,
+	"moves":	["D2D4", "D7D5"],
+	"finalBoard":	"RNBQKBNRPPP.PPPP...........P.......p............ppp.pppprnbqkbnr"
+}

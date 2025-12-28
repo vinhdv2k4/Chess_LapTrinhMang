@@ -1,0 +1,12 @@
+{
+	"matchId":	"M6REJFO4U",
+	"white":	"huy3",
+	"black":	"huy1",
+	"winner":	"huy3",
+	"reason":	"Opponent resigned",
+	"timestamp":	1766921010,
+	"endTime":	1766921158,
+	"moveCount":	20,
+	"moves":	["D2D4", "D7D5", "D1D3", "D8D6", "D3F5", "G8H6", "C1G5", "E7E6", "F5E6", "F8E7", "E6E7", "D6E7", "G5E7", "B8C6", "B1C3", "C6E5", "E1C1", "E5D3", "C1B1", "H8F8"],
+	"finalBoard":	"R.B.KR..PPP.bPPP.......N...P.......p......nN....ppp.pppp.k.r.bnr"
+}
