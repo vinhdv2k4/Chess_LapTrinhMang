@@ -57,6 +57,11 @@ waiting_for_game_start = False  # Flag to block menu actions after accepting cha
 pending_offer = None  # 'draw' or 'rematch'
 offer_sender = None
 
+# Timers
+white_time = 600 # 10 minutes in seconds
+black_time = 600
+last_timer_update = 0
+
 # Matchmaking
 is_finding_match = False
 matchmaking_text = "Searching for opponent..."
@@ -156,6 +161,7 @@ def reset_game_state():
     global white_pieces, white_locations, black_pieces, black_locations
     global captured_pieces_white, captured_pieces_black, turn_step, selection
     global valid_moves, winner, game_over, pending_offer, offer_sender
+    global white_time, black_time
     
     white_pieces = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook',
                     'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn', 'pawn']
@@ -174,6 +180,8 @@ def reset_game_state():
     game_over = False
     pending_offer = None
     offer_sender = None
+    white_time = 600
+    black_time = 600
 
 # Globals for Replay
 replay_snapshots = []
@@ -385,6 +393,21 @@ def draw_captured():
 def draw_check():
     pass # Managed by server
 
+def draw_timers():
+    # Helper to format time
+    def format_time(seconds):
+        minutes = int(seconds) // 60
+        seconds = int(seconds) % 60
+        return f"{minutes:02d}:{seconds:02d}"
+
+    # Draw White Timer
+    white_str = f"White: {format_time(white_time)}"
+    screen.blit(font.render(white_str, True, 'black'), (620, 750))
+    
+    # Draw Black Timer
+    black_str = f"Black: {format_time(black_time)}"
+    screen.blit(font.render(black_str, True, 'black'), (620, 20))
+
 def draw_game_over():
     pygame.draw.rect(screen, 'black', [200, 200, 400, 100])
     screen.blit(font.render(f'{winner} won the game!', True, 'white'), (210, 210))
@@ -475,7 +498,8 @@ challenge_notification = ChallengeNotification(screen, network_client)
 
 run = True
 while run:
-    timer.tick(fps)
+    dt_ms = timer.tick(fps)
+    dt_sec = dt_ms / 1000.0
     
     # Handle different states
     if current_state == STATE_AUTH:
@@ -993,6 +1017,12 @@ while run:
                                 black_pieces.pop(b_idx)
                                 black_locations.pop(b_idx)
                     
+                    # Sync timers from message
+                    if 'white_time' in move_data:
+                        white_time = move_data['white_time']
+                    if 'black_time' in move_data:
+                        black_time = move_data['black_time']
+
                     globals()['online_is_my_turn'] = True
                     print(f"[Main] Turn switched! My turn: True")
                     selection = 100
@@ -1001,13 +1031,37 @@ while run:
                 # 3. Handle MOVE_OK (Confirmation)
                 move_ok = async_handler.get_move_ok()
                 if move_ok:
-                    pass # Handled optimistically
-                
+                    # Sync timer if server sent it
+                    if 'white_time' in move_ok:
+                         white_time = move_ok['white_time']
+                    if 'black_time' in move_ok:
+                         black_time = move_ok['black_time']
+        
+        # Decrement local timer
+        if online_game_active and not game_over:
+             if globals().get('online_is_my_turn', False):
+                 # My turn
+                 if online_my_role == 'white':
+                     white_time -= dt_sec
+                 else:
+                     black_time -= dt_sec
+             else:
+                 # Opponent turn
+                 if online_my_role == 'white':
+                     black_time -= dt_sec
+                 else:
+                     white_time -= dt_sec
+             
+             # Prevent negative display locally
+             if white_time < 0: white_time = 0
+             if black_time < 0: black_time = 0
+
         screen.fill('dark gray')
         draw_board()
         draw_pieces()
         draw_captured()
         draw_check()
+        draw_timers()
         
         # Display online game info
         if online_game_active:

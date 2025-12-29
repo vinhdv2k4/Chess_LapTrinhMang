@@ -17,8 +17,15 @@
 
 #define MAX_MATCHES 50 // Số lượng ván đấu tối đa
 
-// Forward declaration từ match_history.c
+#define MAX_MATCHES 50 // Số lượng ván đấu tối đa
+
+// Forward declarations
 void start_recording_match(const char *match_id);
+void send_game_result(int match_idx, const char *winner, const char *reason); // from game_manager_handlers.c
+int send_json(int client_idx, cJSON *json); // from client_handler.c
+
+static pthread_t timeout_thread_id;
+static int timeout_thread_running = 0;
 
 // Biến toàn cục - không dùng static để có thể truy cập từ module khác
 Match matches[MAX_MATCHES];                              // Mảng lưu thông tin các ván đấu
@@ -201,7 +208,13 @@ int create_match(int challenger_idx, int opponent_idx)
     match->last_move_to_row = -1;
     match->last_move_to_col = -1;
     match->halfmove_clock = 0;
+    match->halfmove_clock = 0;
     match->fullmove_number = 1;
+    
+    // Khởi tạo thời gian
+    match->white_time_remaining = DEFAULT_TIME_LIMIT;
+    match->black_time_remaining = DEFAULT_TIME_LIMIT;
+    match->last_move_time = time(NULL);
 
     // Lưu match_id trước khi unlock để gọi start_recording_match
     char match_id_copy[32];
@@ -295,7 +308,13 @@ int create_match_with_colors(int white_idx, int black_idx)
     match->last_move_to_row = -1;
     match->last_move_to_col = -1;
     match->halfmove_clock = 0;
+    match->halfmove_clock = 0;
     match->fullmove_number = 1;
+    
+    // Khởi tạo thời gian (reset lại cho rematch)
+    match->white_time_remaining = DEFAULT_TIME_LIMIT;
+    match->black_time_remaining = DEFAULT_TIME_LIMIT;
+    match->last_move_time = time(NULL);
 
     // Lưu match_id trước khi unlock để gọi start_recording_match
     char match_id_copy[32];
@@ -541,4 +560,93 @@ int get_client_match(int client_idx)
         }
     }
     return -1; // Không đang trong ván đấu nào
+}
+
+/**
+ * check_match_timeouts - Kiểm tra tất cả ván đấu xem có ai hết giờ không
+ */
+void check_match_timeouts() {
+    pthread_mutex_lock(&match_mutex);
+    time_t current_time = time(NULL);
+    
+    for (int i = 0; i < MAX_MATCHES; i++) {
+        if (!matches[i].is_active) continue;
+        
+        Match *match = &matches[i];
+        
+        // Tính thời gian đã trôi qua kể từ nước đi cuối
+        // Lưu ý: Chỉ trừ thời gian của người đang đi
+        double elapsed = difftime(current_time, match->last_move_time);
+        
+        // Kiểm tra timeout
+        if (match->current_turn == 0) { // White's turn
+            if (match->white_time_remaining - elapsed <= 0) {
+                // White timeouts -> Black wins
+                // Unlock trước khi gọi send_game_result vì nó có thể cần lock (tùy implement, nhưng an toàn hơn)
+                // Tuy nhiên send_game_result expects match_idx. 
+                // Cẩn thận deadlock. send_game_result sẽ lock match_mutex.
+                // Ở đây ta đang giữ lock. Cần sửa send_game_result hoặc xử lý khéo léo.
+                // Giải pháp: Mark as finished, rồi sau loop xử lý, hoặc unlock -> call -> lock lại.
+                
+                // Để đơn giản và tránh deadlock, ta unlock tạm thời
+                char winner_copy[32];
+                strncpy(winner_copy, match->black_player, 31);
+                winner_copy[31] = '\0';
+                
+                pthread_mutex_unlock(&match_mutex);
+                send_game_result(i, winner_copy, "Timeout");
+                pthread_mutex_lock(&match_mutex);
+                
+                // Sau khi lock lại, match có thể đã thay đổi (dù khó xảy ra nếu single thread timeout)
+                // Nhưng send_game_result đã set is_active = 0, nên lần lặp sau sẽ skip
+            }
+        } else { // Black's turn
+             if (match->black_time_remaining - elapsed <= 0) {
+                // Black timeouts -> White wins
+                char winner_copy[32];
+                strncpy(winner_copy, match->white_player, 31);
+                winner_copy[31] = '\0';
+                
+                pthread_mutex_unlock(&match_mutex);
+                send_game_result(i, winner_copy, "Timeout");
+                pthread_mutex_lock(&match_mutex);
+            }
+        }
+    }
+    
+    pthread_mutex_unlock(&match_mutex);
+}
+
+/**
+ * timeout_monitor_loop - Thread loop để kiểm tra timeout định kỳ
+ */
+void *timeout_monitor_loop(void *arg) {
+    while (timeout_thread_running) {
+        check_match_timeouts();
+        sleep(1); // Kiểm tra mỗi giây
+    }
+    return NULL;
+}
+
+/**
+ * timeout_monitor_start - Bắt đầu background thread kiểm tra timeout
+ */
+void timeout_monitor_start() {
+    if (timeout_thread_running) return;
+    
+    timeout_thread_running = 1;
+    if (pthread_create(&timeout_thread_id, NULL, timeout_monitor_loop, NULL) != 0) {
+        perror("Failed to create timeout monitor thread");
+        timeout_thread_running = 0;
+    } else {
+        printf("Timeout monitor thread started\n");
+        pthread_detach(timeout_thread_id);
+    }
+}
+
+/**
+ * timeout_monitor_stop - Dừng background thread
+ */
+void timeout_monitor_stop() {
+    timeout_thread_running = 0;
 }

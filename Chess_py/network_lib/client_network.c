@@ -76,36 +76,30 @@ int receive_message(int sock, char *buffer, int size)
 {
     if (sock <= 0) return -1;
 
-    // Clear buffer to prevent stale data
+    // Clear buffer
     memset(buffer, 0, size);
 
     int total = 0;
+    char c;
     
-    // Read in chunks for better performance
+    // Read 1 byte at a time to avoid over-reading next message
     while (total < size - 1)
     {
-        // Try to read up to remaining space
-        int to_read = (size - 1 - total) > 512 ? 512 : (size - 1 - total);
-        int n = recv(sock, buffer + total, to_read, 0);
+        int n = recv(sock, &c, 1, 0);
         
         if (n <= 0) {
-            // Error or timeout
+            // Error or connection closed
             if (total > 0) {
-                // We have partial data, check if it's complete
                 buffer[total] = '\0';
                 return total;
             }
             return -1;
         }
         
-        total += n;
+        buffer[total++] = c;
         
-        // Check if we've received a complete message (ends with \n)
-        for (int i = total - n; i < total; i++) {
-            if (buffer[i] == '\n') {
-                buffer[i] = '\0';  // Replace \n with null terminator
-                return i + 1;  // Return position after newline
-            }
+        if (c == '\n') {
+            break; // Message complete
         }
     }
 

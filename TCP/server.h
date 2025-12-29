@@ -26,6 +26,7 @@
 #define BUFFER_SIZE 4096  // Kích thước buffer cho message
 #define MAX_CLIENTS 100   // Số lượng client tối đa đồng thời
 #define MAX_MATCHES 50    // Số lượng ván đấu tối đa đồng thời
+#define DEFAULT_TIME_LIMIT 600 // Thời gian cho mỗi người chơi (giây) - 10 phút
 
 // ============= ENUMS & STRUCTURES =============
 
@@ -132,6 +133,11 @@ typedef struct
     int last_move_to_col;
     int halfmove_clock;
     int fullmove_number;
+    
+    // Time control
+    time_t last_move_time;
+    int white_time_remaining; // seconds
+    int black_time_remaining; // seconds
 } Match;
 
 // ============= GLOBAL VARIABLES =============
@@ -158,6 +164,7 @@ extern Match matches[MAX_MATCHES];
 void auth_manager_init();  // Khởi tạo module xác thực (load users)
 void match_manager_init(); // Khởi tạo module quản lý ván đấu
 void game_manager_init();  // Khởi tạo module logic game
+void timeout_monitor_start(); // Khởi tạo thread kiểm tra timeout
 
 // ============= CLIENT HANDLER FUNCTIONS =============
 
