@@ -211,6 +211,23 @@ int handle_move(int client_idx, cJSON *data)
     // Thực hiện nước đi (sử dụng execute_move để xử lý en passant, castling, promotion)
     execute_move(match, from_row, from_col, to_row, to_col, promotion);
 
+    // Cập nhật thời gian
+    time_t current_time = time(NULL);
+    int elapsed = (int)difftime(current_time, match->last_move_time);
+    
+    if (match->current_turn == 0) // White just moved
+    {
+        match->white_time_remaining -= elapsed;
+        if (match->white_time_remaining < 0) match->white_time_remaining = 0;
+    }
+    else // Black just moved
+    {
+        match->black_time_remaining -= elapsed;
+        if (match->black_time_remaining < 0) match->black_time_remaining = 0;
+    }
+    
+    match->last_move_time = current_time;
+
     // Chuyển lượt
     match->current_turn = 1 - match->current_turn;
     if (match->current_turn == 0) // Sau khi đen đi xong
@@ -236,6 +253,8 @@ int handle_move(int client_idx, cJSON *data)
     cJSON *ok_data = cJSON_CreateObject();
     cJSON_AddStringToObject(ok_data, "from", from);
     cJSON_AddStringToObject(ok_data, "to", to);
+    cJSON_AddNumberToObject(ok_data, "white_time", match->white_time_remaining);
+    cJSON_AddNumberToObject(ok_data, "black_time", match->black_time_remaining);
     cJSON_AddItemToObject(move_ok, "data", ok_data);
     send_json(client_idx, move_ok);
     cJSON_Delete(move_ok);
@@ -246,6 +265,8 @@ int handle_move(int client_idx, cJSON *data)
     cJSON *opp_data = cJSON_CreateObject();
     cJSON_AddStringToObject(opp_data, "from", from);
     cJSON_AddStringToObject(opp_data, "to", to);
+    cJSON_AddNumberToObject(opp_data, "white_time", match->white_time_remaining);
+    cJSON_AddNumberToObject(opp_data, "black_time", match->black_time_remaining);
     cJSON_AddItemToObject(opp_move, "data", opp_data);
     send_json(opponent_idx, opp_move);
     cJSON_Delete(opp_move);

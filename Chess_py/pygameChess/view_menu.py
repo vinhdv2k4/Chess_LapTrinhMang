@@ -5,14 +5,16 @@ Displays after successful authentication
 
 import pygame
 from config import *
+from view_profile import ProfileModal
 
 
 class MenuView:
     """Main menu screen with matchmaking and profile options"""
     
-    def __init__(self, screen, network_client):
+    def __init__(self, screen, network_client, async_handler=None):
         self.screen = screen
         self.network = network_client
+        self.async_handler = async_handler
         self.font_title = pygame.font.Font(FONT_NAME, FONT_SIZE_TITLE)
         self.font_large = pygame.font.Font(FONT_NAME, FONT_SIZE_LARGE)
         self.font_medium = pygame.font.Font(FONT_NAME, FONT_SIZE_MEDIUM)
@@ -33,7 +35,8 @@ class MenuView:
         self._should_show_history = False
         self._should_find_match = False
         
-        # Button rectangles (centered layout)
+        # Profile Modal
+        self.profile_modal = ProfileModal(screen, network_client, async_handler)
         button_width = 300
         button_height = 70
         button_spacing = 85
@@ -72,6 +75,10 @@ class MenuView:
         
     def handle_event(self, event):
         """Handle pygame events"""
+        if self.profile_modal.is_visible:
+            if self.profile_modal.handle_event(event):
+                return
+
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.state == "menu":
                 # Menu buttons
@@ -111,10 +118,8 @@ class MenuView:
     
     def view_profile(self):
         """View user profile"""
-        # For now, just show a message
-        # In future, can create a separate profile view or popup
-        self.message = f"Profile: {self.username} | Session: {self.session_id[:8]}..."
-        self.message_color = COLOR_SUCCESS
+        if self.profile_modal:
+            self.profile_modal.show(self.username, self.session_id)
     
     def logout(self):
         """Logout and return to auth screen"""
@@ -150,6 +155,10 @@ class MenuView:
             self._draw_menu()
         elif self.state == "waiting":
             self._draw_waiting()
+        
+        # Draw profile modal overlay if visible
+        if self.profile_modal.is_visible:
+            self.profile_modal.draw()
             
     def find_match(self):
         self._should_find_match = True

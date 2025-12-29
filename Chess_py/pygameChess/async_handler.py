@@ -32,6 +32,7 @@ class AsyncMessageHandler:
         self.rematch_declined = []
         self.matchmaking_status = []
         self.match_replay = [] # Queue for MATCH_REPLAY messages
+        self.profile_updates = [] # Queue for PROFILE_INFO/ERROR
         self.other_messages = []
         
         # Lock for thread safety
@@ -142,6 +143,12 @@ class AsyncMessageHandler:
             elif action == "MATCHMAKING_STATUS":
                 self.matchmaking_status.append(data)
                 print(f"[AsyncHandler] Received matchmaking status: {data.get('status')}")
+
+            elif action == "PROFILE_INFO" or action == "PROFILE_ERROR":
+                # Combine action and data for profile updates
+                full_msg = {"action": action, "data": data}
+                self.profile_updates.append(full_msg)
+                print(f"[AsyncHandler] Received profile update: {action}")
                 
             else:
                 # Store other messages
@@ -249,6 +256,12 @@ class AsyncMessageHandler:
         with self.lock:
             if self.matchmaking_status:
                 return self.matchmaking_status.pop(0)
+        return None
+    
+    def get_profile_update(self):
+        with self.lock:
+            if self.profile_updates:
+                return self.profile_updates.pop(0)
         return None
     
     def has_pending_messages(self):
