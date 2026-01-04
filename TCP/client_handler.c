@@ -169,6 +169,10 @@ void process_message(int client_idx, const char *message)
     {
         handle_login(client_idx, data_obj); // Xử lý đăng nhập
     }
+    else if (strcmp(action, "RECONNECT") == 0)
+    {
+        handle_reconnect(client_idx, data_obj); // Xử lý kết nối lại
+    }
     else if (strcmp(action, "REQUEST_PLAYER_LIST") == 0)
     {
         handle_request_player_list(client_idx); // Lấy danh sách người chơi

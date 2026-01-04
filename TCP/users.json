@@ -37,17 +37,17 @@
 		}, {
 			"username":	"huy1",
 			"password_hash":	"8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-			"elo_rating":	1174,
-			"wins":	2,
-			"losses":	4,
-			"draws":	2
+			"elo_rating":	1187,
+			"wins":	4,
+			"losses":	6,
+			"draws":	3
 		}, {
 			"username":	"huy2",
 			"password_hash":	"8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
-			"elo_rating":	1211,
-			"wins":	3,
-			"losses":	2,
-			"draws":	2
+			"elo_rating":	1198,
+			"wins":	5,
+			"losses":	4,
+			"draws":	3
 		}, {
 			"username":	"huy3",
 			"password_hash":	"8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",

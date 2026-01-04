@@ -138,7 +138,15 @@ typedef struct
     time_t last_move_time;
     int white_time_remaining; // seconds
     int black_time_remaining; // seconds
+    
+    // Disconnect grace period
+    int white_disconnected;      // 1 if white player disconnected
+    int black_disconnected;      // 1 if black player disconnected
+    time_t white_disconnect_time; // When white disconnected
+    time_t black_disconnect_time; // When black disconnected
 } Match;
+
+#define DISCONNECT_GRACE_PERIOD 60  // 60 seconds to reconnect
 
 // ============= GLOBAL VARIABLES =============
 
@@ -211,6 +219,14 @@ int handle_register(int client_idx, cJSON *data);
 int handle_login(int client_idx, cJSON *data);
 
 /**
+ * handle_reconnect - Xử lý yêu cầu kết nối lại với session cũ
+ * @client_idx: Index của client
+ * @data: JSON object chứa sessionId và username
+ * Return: 0 nếu thành công, -1 nếu thất bại
+ */
+int handle_reconnect(int client_idx, cJSON *data);
+
+/**
  * logout_client - Đăng xuất client
  * @client_idx: Index của client cần logout
  */
@@ -258,6 +274,18 @@ int handle_accept(int client_idx, cJSON *data);
  * Return: 0 nếu thành công, -1 nếu thất bại
  */
 int handle_decline(int client_idx, cJSON *data);
+
+/**
+ * mark_player_disconnected - Đánh dấu player đã disconnect để bắt đầu grace period
+ * @username: Username của player
+ */
+void mark_player_disconnected(const char *username);
+
+/**
+ * mark_player_reconnected - Đánh dấu player đã reconnect để resume game
+ * @username: Username của player
+ */
+void mark_player_reconnected(const char *username);
 
 // ============= GAME LOGIC FUNCTIONS =============
 

@@ -5,6 +5,9 @@ import time
 import os
 from config import SERVER_HOST, SERVER_PORT
 
+# Session file path
+SESSION_FILE = os.path.expanduser("~/.chess_session.json")
+
 # Load C library
 try:
     # Assuming library is in ../network_lib/client_network.so relative to this file
@@ -24,6 +27,9 @@ try:
     _clib.receive_message.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
     _clib.receive_message.restype = ctypes.c_int
     
+    _clib.check_connection.argtypes = [ctypes.c_int]
+    _clib.check_connection.restype = ctypes.c_int
+    
 except OSError:
     print(f"Error: Could not load C library at {_lib_path}")
     _clib = None
@@ -41,8 +47,52 @@ class NetworkClient:
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
         
+        # Session tracking for reconnect
+        self.last_session_id = None
+        self.last_username = None
+        
+        # Load persisted session from file
+        self._load_session_from_file()
+        
         if not _clib:
             print("[Network] FATAL: C library not loaded")
+    
+    def _load_session_from_file(self):
+        """Load saved session from file for reconnect after restart"""
+        try:
+            if os.path.exists(SESSION_FILE):
+                with open(SESSION_FILE, 'r') as f:
+                    data = json.load(f)
+                    self.last_session_id = data.get('session_id')
+                    self.last_username = data.get('username')
+                    print(f"[Network] Loaded saved session: {self.last_username}")
+        except Exception as e:
+            print(f"[Network] Could not load session: {e}")
+    
+    def _save_session_to_file(self):
+        """Save session to file for reconnect after restart"""
+        try:
+            with open(SESSION_FILE, 'w') as f:
+                json.dump({
+                    'session_id': self.last_session_id,
+                    'username': self.last_username
+                }, f)
+            print(f"[Network] Session saved to file")
+        except Exception as e:
+            print(f"[Network] Could not save session: {e}")
+    
+    def _clear_session_file(self):
+        """Clear session file on logout"""
+        try:
+            if os.path.exists(SESSION_FILE):
+                os.remove(SESSION_FILE)
+                print("[Network] Session file cleared")
+        except:
+            pass
+    
+    def has_saved_session(self):
+        """Check if there's a saved session to try reconnecting"""
+        return self.last_session_id is not None and self.last_username is not None
         
     def connect(self):
         """Establish connection to the server via C library"""
@@ -102,6 +152,45 @@ class NetworkClient:
         self.reconnect_attempts += 1
         return self.connect()
     
+    def reconnect_with_session(self):
+        """Reconnect và restore session bằng sessionId đã lưu"""
+        if not self.last_session_id or not self.last_username:
+            print("[Network] No saved session to restore")
+            return False
+        
+        if not self.reconnect():
+            return False
+        
+        # Gửi RECONNECT request thay vì LOGIN
+        print(f"[Network] Attempting to restore session for {self.last_username}")
+        return self.send_message("RECONNECT", {
+            "sessionId": self.last_session_id,
+            "username": self.last_username
+        })
+    
+    def save_session(self, session_id, username):
+        """Lưu session để có thể reconnect sau này"""
+        self.last_session_id = session_id
+        self.last_username = username
+        self._save_session_to_file()  # Persist to file
+        print(f"[Network] Session saved: {username} ({session_id[:8]}...)")
+    
+    def clear_session(self):
+        """Clear session on logout"""
+        self.last_session_id = None
+        self.last_username = None
+        self._clear_session_file()
+    
+    def check_alive(self):
+        """Kiểm tra connection còn sống không"""
+        if not _clib or self.socket_fd <= 0:
+            return False
+        try:
+            result = _clib.check_connection(self.socket_fd)
+            return result == 1
+        except:
+            return False
+    
     def send_message(self, action, data):
         """Send JSON message via C library"""
         message = {
@@ -140,33 +229,29 @@ class NetworkClient:
         try:
             with self.lock:
                 if not self.connected or self.socket_fd <= 0:
-                    print("[Network] Not connected")
                     return None
-            
-            # Create buffer
-            buffer = ctypes.create_string_buffer(4096)
-            
-            # Call C receive (blocking with timeout set in connect)
-            bytes_read = _clib.receive_message(self.socket_fd, buffer, 4096)
-            
-            if bytes_read > 0:
-                json_str = buffer.value.decode('utf-8').strip()
-                if json_str:
-                    try:
-                        message = json.loads(json_str)
-                        print(f"[Network] Received: {json_str}")
-                        return message
-                    except json.JSONDecodeError:
-                        print(f"[Network] JSON parse error: {json_str}")
-                        return None
-                return None
-            elif bytes_read == -1:
-                # -1 can mean timeout OR actual error
-                # Don't mark as disconnected - let it be handled by send failures
-                # If truly disconnected, next send will fail
-                return None
-            else:
-                return None
+                
+                # Create buffer
+                buffer = ctypes.create_string_buffer(4096)
+                
+                # Call C receive (blocking with timeout set in connect)
+                bytes_read = _clib.receive_message(self.socket_fd, buffer, 4096)
+                
+                if bytes_read > 0:
+                    json_str = buffer.value.decode('utf-8').strip()
+                    if json_str:
+                        try:
+                            message = json.loads(json_str)
+                            print(f"[Network] Received: {json_str}")
+                            return message
+                        except json.JSONDecodeError:
+                            print(f"[Network] JSON parse error: {json_str}")
+                            return None
+                    return None
+                elif bytes_read == -1:
+                    return None
+                else:
+                    return None
                 
         except Exception as e:
             print(f"[Network] Receive error: {e}")

@@ -32,6 +32,7 @@ class MenuView:
         self._should_show_players = False
         self._should_show_history = False
         self._should_find_match = False
+        self._should_view_profile = False
         
         # Button rectangles (centered layout)
         button_width = 300
@@ -110,11 +111,8 @@ class MenuView:
         # self.network.send_message("CANCEL_MATCH", {"sessionId": self.session_id})
     
     def view_profile(self):
-        """View user profile"""
-        # For now, just show a message
-        # In future, can create a separate profile view or popup
-        self.message = f"Profile: {self.username} | Session: {self.session_id[:8]}..."
-        self.message_color = COLOR_SUCCESS
+        """View user profile - opens profile modal"""
+        self._should_view_profile = True
     
     def logout(self):
         """Logout and return to auth screen"""
@@ -306,6 +304,10 @@ class MenuView:
         self._should_logout = False
         self._should_exit = False
         self._should_show_players = False
-        self._should_show_players = False
         self._should_show_history = False
         self._should_find_match = False
+        self._should_view_profile = False
+    
+    def should_view_profile(self):
+        """Check if should view profile"""
+        return self._should_view_profile

@@ -1,0 +1,12 @@
+{
+	"matchId":	"M04YT7RAE",
+	"white":	"huy1",
+	"black":	"huy2",
+	"winner":	"huy2",
+	"reason":	"Timeout",
+	"timestamp":	1767536623,
+	"endTime":	1767537228,
+	"moveCount":	2,
+	"moves":	["E2E4", "E7E5"],
+	"finalBoard":	"RNBQKBNRPPPP.PPP............P.......p...........pppp.ppprnbqkbnr"
+}

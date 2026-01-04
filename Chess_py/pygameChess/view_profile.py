@@ -79,9 +79,16 @@ class ProfileModal:
         if not self.is_visible:
             return False
         
-        # Handle close button
+        # Handle close button click
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.close_button.is_clicked(event.pos):
+            # Direct rect collision check
+            close_rect = pygame.Rect(
+                self.modal_x + self.modal_width - 120,
+                self.modal_y + self.modal_height - 70,
+                100, 50
+            )
+            if close_rect.collidepoint(event.pos):
+                print("[ProfileModal] Close button clicked")
                 self.hide()
                 return True
         

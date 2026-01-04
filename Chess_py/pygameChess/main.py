@@ -480,6 +480,7 @@ def cleanup_and_exit():
         if network_client.is_connected() and session_id:
             try:
                  network_client.send_message("LOGOUT", {"sessionId": session_id})
+                 network_client.clear_session()  # Clear persisted session on logout
                  print("[Main] Sent LOGOUT before exit")
             except Exception as e:
                  print(f"[Main] Error sending LOGOUT: {e}")
@@ -495,6 +496,9 @@ profile_modal = ProfileModal(screen, network_client)
 match_history_view = MatchHistoryView(screen, network_client)
 players_view = OnlinePlayersView(screen, network_client, async_handler, profile_modal)
 challenge_notification = ChallengeNotification(screen, network_client)
+
+# Note: Session sẽ được kiểm tra sau khi login
+# Server sẽ thông báo nếu user có game đang chơi
 
 run = True
 while run:
@@ -522,6 +526,13 @@ while run:
         if auth_view.is_authenticated():
             session_data = auth_view.get_session_data()
             print(f"[Main] Logged in as: {session_data.get('username', 'Unknown')}")
+            
+            # Save session for reconnect
+            network_client.save_session(
+                session_data.get('sessionId', ''),
+                session_data.get('username', '')
+            )
+            
             menu_view.set_session_data(session_data)
             challenge_notification.set_session_data(session_data)
             async_handler.start()
@@ -534,6 +545,8 @@ while run:
             if event.type == pygame.QUIT:
                 menu_view.exit_app()  # This handles LOGOUT
                 run = False
+            elif profile_modal.is_visible:
+                profile_modal.handle_event(event)
             else:
                 challenge_notification.handle_event(event)
                 if not challenge_notification.is_visible:
@@ -580,6 +593,13 @@ while run:
         except pygame.error:
             pass
         
+        # Draw profile modal if visible
+        if profile_modal.is_visible:
+            try:
+                profile_modal.draw()
+            except pygame.error:
+                pass
+        
         if challenge_notification.should_accept():
             print("[Main] Challenge accepted, waiting for game to start...")
             challenge_notification.reset()
@@ -617,6 +637,10 @@ while run:
                 is_finding_match = True
                 matchmaking_text = "Searching for opponent..."
                 current_state = STATE_FIND_MATCH
+                menu_view.reset()
+            elif menu_view.should_view_profile():
+                print("[Main] Viewing my profile...")
+                profile_modal.show(session_data.get("username", ""), session_data.get("sessionId", ""))
                 menu_view.reset()
             elif menu_view.should_do_exit():
                 print("[Main] Exiting...")
@@ -919,6 +943,76 @@ while run:
             
             if async_handler.get_rematch_declined():
                 print("[Main] Rematch request declined by opponent")
+            
+            # === RECONNECT HANDLING ===
+            reconnect_data = async_handler.get_reconnect_success()
+            if reconnect_data:
+                print(f"[Main] Reconnect successful!")
+                in_game = reconnect_data.get('inGame', False)
+                
+                if in_game:
+                    # Restore game state from server
+                    online_match_id = reconnect_data.get('matchId')
+                    white_player = reconnect_data.get('white')
+                    black_player = reconnect_data.get('black')
+                    current_turn = reconnect_data.get('currentTurn', 0)
+                    white_time = reconnect_data.get('whiteTime', 600)
+                    black_time = reconnect_data.get('blackTime', 600)
+                    board_str = reconnect_data.get('board', '')
+                    
+                    my_username = session_data.get('username')
+                    online_my_role = 'white' if white_player == my_username else 'black'
+                    online_opponent_name = black_player if online_my_role == 'white' else white_player
+                    online_is_my_turn = (current_turn == 0 and online_my_role == 'white') or \
+                                       (current_turn == 1 and online_my_role == 'black')
+                    online_game_active = True
+                    
+                    print(f"[Main] Restored game: {online_match_id}")
+                    print(f"[Main] I am {online_my_role}, my turn: {online_is_my_turn}")
+                    
+                    # Restore board from board_str (64 chars)
+                    if len(board_str) == 64:
+                        white_pieces.clear()
+                        white_locations.clear()
+                        black_pieces.clear()
+                        black_locations.clear()
+                        
+                        piece_map = {
+                            'p': 'pawn', 'r': 'rook', 'n': 'knight', 
+                            'b': 'bishop', 'q': 'queen', 'k': 'king',
+                            'P': 'pawn', 'R': 'rook', 'N': 'knight',
+                            'B': 'bishop', 'Q': 'queen', 'K': 'king'
+                        }
+                        
+                        for row in range(8):
+                            for col in range(8):
+                                char = board_str[row * 8 + col]
+                                if char != '.':
+                                    piece_name = piece_map.get(char)
+                                    if piece_name:
+                                        if char.islower():  # White
+                                            white_pieces.append(piece_name)
+                                            white_locations.append((col, row))
+                                        else:  # Black
+                                            black_pieces.append(piece_name)
+                                            black_locations.append((col, row))
+                        
+                        print(f"[Main] Board restored: {len(white_pieces)} white, {len(black_pieces)} black pieces")
+                    
+                    # Restore turn
+                    turn_step = 0 if current_turn == 0 else 2
+                    game_over = False
+                    winner = ''
+                else:
+                    print("[Main] Reconnected but not in game")
+            
+            reconnect_fail = async_handler.get_reconnect_fail()
+            if reconnect_fail:
+                reason = reconnect_fail.get('reason', 'Unknown')
+                print(f"[Main] Reconnect failed: {reason}")
+                # Go back to auth screen
+                current_state = STATE_AUTH
+                auth_view = AuthView(screen, network_client)
             
             # Game Start (Rematch)
             new_game_data = async_handler.get_game_start()
