@@ -488,10 +488,11 @@ def cleanup_and_exit():
     pygame.quit()
 
 # Initialize views
-auth_view = AuthView(screen, network_client)
-menu_view = MenuView(screen, network_client)
+# Initialize views
 async_handler = AsyncMessageHandler(network_client)
-profile_modal = ProfileModal(screen, network_client)
+auth_view = AuthView(screen, network_client)
+menu_view = MenuView(screen, network_client, async_handler)
+profile_modal = ProfileModal(screen, network_client, async_handler)
 match_history_view = MatchHistoryView(screen, network_client)
 players_view = OnlinePlayersView(screen, network_client, async_handler, profile_modal)
 challenge_notification = ChallengeNotification(screen, network_client)
