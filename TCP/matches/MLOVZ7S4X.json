@@ -1,0 +1,12 @@
+{
+	"matchId":	"MLOVZ7S4X",
+	"white":	"huy2",
+	"black":	"huy1",
+	"winner":	"DRAW",
+	"reason":	"Draw by agreement",
+	"timestamp":	1767021578,
+	"endTime":	1767021633,
+	"moveCount":	0,
+	"moves":	[],
+	"finalBoard":	"RNBQKBNRPPPPPPPP................................pppppppprnbqkbnr"
+}

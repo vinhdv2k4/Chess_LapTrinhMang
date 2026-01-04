@@ -394,6 +394,9 @@ void logout_client(int client_idx)
     pthread_mutex_lock(&clients_mutex);
     if (clients[client_idx].username[0] != '\0') // Đã đăng nhập
     {
+        // Đánh dấu disconnect cho grace period (trước khi xóa username)
+        mark_player_disconnected(clients[client_idx].username);
+        
         pthread_mutex_lock(&auth_mutex);
         int user_idx = find_user(clients[client_idx].username);
         if (user_idx != -1)
@@ -566,6 +569,142 @@ int handle_get_profile(int client_idx, cJSON *data)
 
     printf("Profile requested: %s (ELO: %d, W/L/D: %d/%d/%d)\n",
            username, elo, wins, losses, draws);
+
+    return 0;
+}
+
+/**
+ * handle_reconnect - Xử lý yêu cầu kết nối lại với session cũ
+ * @client_idx: Index của client trong mảng clients
+ * @data: JSON object chứa sessionId và username
+ *
+ * Cho phép client reconnect mà không cần đăng nhập lại nếu session hợp lệ.
+ * Nếu đang trong game, server sẽ gửi lại trạng thái game hiện tại.
+ *
+ * Return: 0 nếu thành công, -1 nếu thất bại
+ */
+int handle_reconnect(int client_idx, cJSON *data)
+{
+    if (!data)
+    {
+        send_error(client_idx, "Missing data");
+        return -1;
+    }
+
+    cJSON *session_obj = cJSON_GetObjectItem(data, "sessionId");
+    cJSON *username_obj = cJSON_GetObjectItem(data, "username");
+
+    if (!session_obj || !username_obj)
+    {
+        send_error(client_idx, "Missing sessionId or username");
+        return -1;
+    }
+
+    const char *session_id = session_obj->valuestring;
+    const char *username = username_obj->valuestring;
+
+    // Tìm client cũ có session này
+    int old_client_idx = -1;
+    pthread_mutex_lock(&clients_mutex);
+    for (int i = 0; i < MAX_CLIENTS; i++)
+    {
+        if (i != client_idx && clients[i].is_active &&
+            strcmp(clients[i].session_id, session_id) == 0 &&
+            strcmp(clients[i].username, username) == 0)
+        {
+            old_client_idx = i;
+            break;
+        }
+    }
+
+    if (old_client_idx == -1)
+    {
+        pthread_mutex_unlock(&clients_mutex);
+
+        // Session không tồn tại hoặc đã hết hạn
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddStringToObject(response, "action", "RECONNECT_FAIL");
+        cJSON *resp_data = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp_data, "reason", "Invalid session");
+        cJSON_AddItemToObject(response, "data", resp_data);
+        send_json(client_idx, response);
+        cJSON_Delete(response);
+        return -1;
+    }
+
+    // Chuyển session từ client cũ sang client mới
+    strncpy(clients[client_idx].username, username, MAX_USERNAME - 1);
+    strncpy(clients[client_idx].session_id, session_id, MAX_SESSION_ID - 1);
+    clients[client_idx].status = clients[old_client_idx].status;
+
+    // Đánh dấu client cũ là inactive (sẽ được cleanup bởi thread cũ)
+    clients[old_client_idx].is_active = 0;
+    clients[old_client_idx].username[0] = '\0';
+    clients[old_client_idx].session_id[0] = '\0';
+
+    pthread_mutex_unlock(&clients_mutex);
+
+    printf("User reconnected: %s (session: %s)\n", username, session_id);
+
+    // Đánh dấu player đã reconnect để resume game timer
+    mark_player_reconnected(username);
+
+    // Gửi thông báo reconnect thành công
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "action", "RECONNECT_SUCCESS");
+    cJSON *resp_data = cJSON_CreateObject();
+    cJSON_AddStringToObject(resp_data, "username", username);
+    cJSON_AddStringToObject(resp_data, "sessionId", session_id);
+
+    // Kiểm tra xem user có đang trong game không
+    int match_idx = get_client_match(client_idx);
+    if (match_idx != -1)
+    {
+        pthread_mutex_lock(&match_mutex);
+        Match *match = &matches[match_idx];
+
+        // Gửi trạng thái game hiện tại
+        cJSON_AddStringToObject(resp_data, "matchId", match->match_id);
+        cJSON_AddStringToObject(resp_data, "white", match->white_player);
+        cJSON_AddStringToObject(resp_data, "black", match->black_player);
+        cJSON_AddNumberToObject(resp_data, "currentTurn", match->current_turn);
+        cJSON_AddNumberToObject(resp_data, "whiteTime", match->white_time_remaining);
+        cJSON_AddNumberToObject(resp_data, "blackTime", match->black_time_remaining);
+
+        // Gửi trạng thái bàn cờ
+        char board_str[128];
+        int idx = 0;
+        for (int row = 0; row < 8; row++)
+        {
+            for (int col = 0; col < 8; col++)
+            {
+                board_str[idx++] = match->board[row][col];
+            }
+        }
+        board_str[idx] = '\0';
+        cJSON_AddStringToObject(resp_data, "board", board_str);
+        cJSON_AddBoolToObject(resp_data, "inGame", 1);
+
+        // Cập nhật client index trong match
+        if (strcmp(match->white_player, username) == 0)
+        {
+            match->white_client_idx = client_idx;
+        }
+        else
+        {
+            match->black_client_idx = client_idx;
+        }
+
+        pthread_mutex_unlock(&match_mutex);
+    }
+    else
+    {
+        cJSON_AddBoolToObject(resp_data, "inGame", 0);
+    }
+
+    cJSON_AddItemToObject(response, "data", resp_data);
+    send_json(client_idx, response);
+    cJSON_Delete(response);
 
     return 0;
 }

@@ -11,10 +11,9 @@ from ui_components import Card, Badge, Button
 class ProfileModal:
     """Modal window to display player profile information"""
     
-    def __init__(self, screen, network_client, async_handler=None):
+    def __init__(self, screen, network_client):
         self.screen = screen
         self.network = network_client
-        self.async_handler = async_handler
         
         # Fonts
         self.font_title = pygame.font.Font(FONT_NAME, FONT_SIZE_LARGE)
@@ -25,8 +24,6 @@ class ProfileModal:
         self.is_visible = False
         self.profile_data = None
         self.username = ""
-        self.loading = False
-        self.error_message = None
         
         # Modal dimensions
         self.modal_width = 600
@@ -51,7 +48,6 @@ class ProfileModal:
         self.is_visible = True
         self.profile_data = None
         self.error_message = None
-        self.loading = True
         
         try:
             # Request profile from server
@@ -59,71 +55,57 @@ class ProfileModal:
                 "username": username,
                 "sessionId": session_id
             })
-            print(f"[ProfileModal] Requested profile for {username}")
             
+            # Receive response
+            response = self.network.receive_message(timeout=2.0)
+            if response and response.get("action") == "PROFILE_INFO":
+                self.profile_data = response.get("data", {})
+                print(f"[ProfileModal] Loaded profile for {username}")
+            else:
+                self.error_message = "Failed to load profile"
+                print(f"[ProfileModal] No valid response for {username}")
         except Exception as e:
             self.error_message = f"Error: {str(e)}"
-            self.loading = False
-            print(f"[ProfileModal] Error sending request: {e}")
+            print(f"[ProfileModal] Error loading profile: {e}")
     
     def hide(self):
         """Hide the modal"""
         self.is_visible = False
         self.profile_data = None
         self.error_message = None
-        self.loading = False
     
     def handle_event(self, event):
         """Handle events"""
         if not self.is_visible:
             return False
         
-        # Handle close button
+        # Handle close button click
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.close_button.is_clicked(event.pos):
+            # Direct rect collision check
+            close_rect = pygame.Rect(
+                self.modal_x + self.modal_width - 120,
+                self.modal_y + self.modal_height - 70,
+                100, 50
+            )
+            if close_rect.collidepoint(event.pos):
+                print("[ProfileModal] Close button clicked")
                 self.hide()
                 return True
         
         self.close_button.handle_event(event)
-        # Consume clicks inside modal to prevent clicking through
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            modal_rect = pygame.Rect(self.modal_x, self.modal_y, self.modal_width, self.modal_height)
-            if modal_rect.collidepoint(event.pos):
-                return True
-                
         return False
     
     def update(self, dt=0.016):
-        """Update animations and check for async responses"""
-        if not self.is_visible:
-            return
-            
-        self.close_button.update(dt)
-        
-        # Check for profile data if loading
-        if self.loading and self.async_handler:
-            update = self.async_handler.get_profile_update()
-            if update:
-                action = update.get("action")
-                data = update.get("data", {})
-                
-                if action == "PROFILE_INFO":
-                    # Check if this update matches the requested username
-                    if data.get("username") == self.username:
-                        self.profile_data = data
-                        self.loading = False
-                        print(f"[ProfileModal] Loaded profile for {self.username}")
-                elif action == "PROFILE_ERROR":
-                    self.error_message = data.get("reason", "Unknown error")
-                    self.loading = False
-                    print(f"[ProfileModal] Error loading profile: {self.error_message}")
-        
+        """Update animations"""
+        if self.is_visible:
+            self.close_button.update(dt)
+    
     def draw(self):
         """Draw the profile modal"""
         if not self.is_visible:
             return
         
-        # Update first (check for async data)
+        # Update first
         self.update()
         
         # Draw overlay (semi-transparent background)
@@ -235,7 +217,7 @@ class ProfileModal:
         self.screen.blit(win_rate_surface, win_rate_rect)
         
         # Online status
-        is_online = self.profile_data.get("online", False)
+        is_online = self.profile_data.get("isOnline", False)
         status_text = "● Online" if is_online else "○ Offline"
         status_color = COLOR_SUCCESS if is_online else COLOR_TEXT_MUTED
         status_surface = self.font_small.render(status_text, True, status_color)

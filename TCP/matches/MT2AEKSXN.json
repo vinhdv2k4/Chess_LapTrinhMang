@@ -1,0 +1,12 @@
+{
+	"matchId":	"MT2AEKSXN",
+	"white":	"huy2",
+	"black":	"huy1",
+	"winner":	"huy1",
+	"reason":	"Disconnect timeout",
+	"timestamp":	1767538878,
+	"endTime":	1767538943,
+	"moveCount":	0,
+	"moves":	[],
+	"finalBoard":	"RNBQKBNRPPPPPPPP................................pppppppprnbqkbnr"
+}

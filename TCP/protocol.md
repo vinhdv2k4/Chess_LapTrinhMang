@@ -267,9 +267,7 @@ Server → Player (người vừa đi)
   "action": "MOVE_OK",
   "data": {
     "from": "E2",
-    "to": "E4",
-    "white_time": 595,
-    "black_time": 600
+    "to": "E4"
   }
 }
 ```
@@ -283,9 +281,7 @@ Server → Player đối thủ
   "action": "OPPONENT_MOVE",
   "data": {
     "from": "E2",
-    "to": "E4",
-    "white_time": 595,
-    "black_time": 600
+    "to": "E4"
   }
 }
 ```
@@ -342,19 +338,6 @@ Hoặc hủy ván:
     "matchId": "M12345"
   }
 }
-
-Hoặc hết giờ:
-
-```json
-{
-  "action": "GAME_RESULT",
-  "data": {
-    "winner": "Alice",
-    "reason": "Timeout",
-    "matchId": "M12345"
-  }
-}
-```
 ```
 
 ---

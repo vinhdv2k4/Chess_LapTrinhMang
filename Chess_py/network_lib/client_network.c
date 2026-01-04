@@ -52,6 +52,29 @@ void disconnect_server(int sock)
     }
 }
 
+// Check if connection is still alive
+// Returns: 1 if connected, 0 if disconnected
+int check_connection(int sock)
+{
+    if (sock <= 0) return 0;
+    
+    // Try to send 0 bytes with MSG_NOSIGNAL to check connection
+    // If socket is broken, send will return -1 with errno set
+    char dummy = 0;
+    int result = send(sock, &dummy, 0, MSG_NOSIGNAL);
+    
+    if (result < 0)
+    {
+        // Check if it's a real disconnect or just a non-blocking issue
+        if (errno == EPIPE || errno == ECONNRESET || errno == ENOTCONN)
+        {
+            return 0; // Disconnected
+        }
+    }
+    
+    return 1; // Still connected
+}
+
 // Send message (appends newline)
 int send_message(int sock, const char *message)
 {

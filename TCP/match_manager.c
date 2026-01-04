@@ -563,7 +563,73 @@ int get_client_match(int client_idx)
 }
 
 /**
+ * mark_player_disconnected - Đánh dấu player đã disconnect
+ * @username: Username của player
+ *
+ * Khi client disconnect, gọi hàm này để bắt đầu grace period
+ */
+void mark_player_disconnected(const char *username)
+{
+    pthread_mutex_lock(&match_mutex);
+    time_t current_time = time(NULL);
+    
+    for (int i = 0; i < MAX_MATCHES; i++)
+    {
+        if (!matches[i].is_active) continue;
+        
+        if (strcmp(matches[i].white_player, username) == 0)
+        {
+            matches[i].white_disconnected = 1;
+            matches[i].white_disconnect_time = current_time;
+            printf("[GracePeriod] White player %s disconnected, %ds to reconnect\n", 
+                   username, DISCONNECT_GRACE_PERIOD);
+        }
+        else if (strcmp(matches[i].black_player, username) == 0)
+        {
+            matches[i].black_disconnected = 1;
+            matches[i].black_disconnect_time = current_time;
+            printf("[GracePeriod] Black player %s disconnected, %ds to reconnect\n", 
+                   username, DISCONNECT_GRACE_PERIOD);
+        }
+    }
+    
+    pthread_mutex_unlock(&match_mutex);
+}
+
+/**
+ * mark_player_reconnected - Đánh dấu player đã reconnect
+ * @username: Username của player
+ *
+ * Khi client reconnect, gọi hàm này để resume game
+ */
+void mark_player_reconnected(const char *username)
+{
+    pthread_mutex_lock(&match_mutex);
+    
+    for (int i = 0; i < MAX_MATCHES; i++)
+    {
+        if (!matches[i].is_active) continue;
+        
+        if (strcmp(matches[i].white_player, username) == 0 && matches[i].white_disconnected)
+        {
+            matches[i].white_disconnected = 0;
+            matches[i].last_move_time = time(NULL); // Resume timer
+            printf("[GracePeriod] White player %s reconnected, game resumed\n", username);
+        }
+        else if (strcmp(matches[i].black_player, username) == 0 && matches[i].black_disconnected)
+        {
+            matches[i].black_disconnected = 0;
+            matches[i].last_move_time = time(NULL); // Resume timer
+            printf("[GracePeriod] Black player %s reconnected, game resumed\n", username);
+        }
+    }
+    
+    pthread_mutex_unlock(&match_mutex);
+}
+
+/**
  * check_match_timeouts - Kiểm tra tất cả ván đấu xem có ai hết giờ không
+ * Bao gồm kiểm tra grace period cho disconnect
  */
 void check_match_timeouts() {
     pthread_mutex_lock(&match_mutex);
@@ -574,21 +640,56 @@ void check_match_timeouts() {
         
         Match *match = &matches[i];
         
-        // Tính thời gian đã trôi qua kể từ nước đi cuối
-        // Lưu ý: Chỉ trừ thời gian của người đang đi
+        // === CHECK DISCONNECT GRACE PERIOD ===
+        // Nếu white disconnected và hết grace period -> black wins
+        if (match->white_disconnected) {
+            double disconnect_elapsed = difftime(current_time, match->white_disconnect_time);
+            if (disconnect_elapsed >= DISCONNECT_GRACE_PERIOD) {
+                char winner_copy[32];
+                strncpy(winner_copy, match->black_player, 31);
+                winner_copy[31] = '\0';
+                
+                printf("White player %s exceeded grace period (%ds)\n", 
+                       match->white_player, DISCONNECT_GRACE_PERIOD);
+                
+                pthread_mutex_unlock(&match_mutex);
+                send_game_result(i, winner_copy, "Disconnect timeout");
+                pthread_mutex_lock(&match_mutex);
+                continue;
+            }
+        }
+        
+        // Nếu black disconnected và hết grace period -> white wins
+        if (match->black_disconnected) {
+            double disconnect_elapsed = difftime(current_time, match->black_disconnect_time);
+            if (disconnect_elapsed >= DISCONNECT_GRACE_PERIOD) {
+                char winner_copy[32];
+                strncpy(winner_copy, match->white_player, 31);
+                winner_copy[31] = '\0';
+                
+                printf("Black player %s exceeded grace period (%ds)\n", 
+                       match->black_player, DISCONNECT_GRACE_PERIOD);
+                
+                pthread_mutex_unlock(&match_mutex);
+                send_game_result(i, winner_copy, "Disconnect timeout");
+                pthread_mutex_lock(&match_mutex);
+                continue;
+            }
+        }
+        
+        // === PAUSE GAME TIMER IF ANYONE DISCONNECTED ===
+        // Chỉ đếm thời gian game khi cả hai đều connected
+        if (match->white_disconnected || match->black_disconnected) {
+            // Update last_move_time để pause timer
+            match->last_move_time = current_time;
+            continue;
+        }
+        
+        // === NORMAL GAME TIMEOUT CHECK ===
         double elapsed = difftime(current_time, match->last_move_time);
         
-        // Kiểm tra timeout
         if (match->current_turn == 0) { // White's turn
             if (match->white_time_remaining - elapsed <= 0) {
-                // White timeouts -> Black wins
-                // Unlock trước khi gọi send_game_result vì nó có thể cần lock (tùy implement, nhưng an toàn hơn)
-                // Tuy nhiên send_game_result expects match_idx. 
-                // Cẩn thận deadlock. send_game_result sẽ lock match_mutex.
-                // Ở đây ta đang giữ lock. Cần sửa send_game_result hoặc xử lý khéo léo.
-                // Giải pháp: Mark as finished, rồi sau loop xử lý, hoặc unlock -> call -> lock lại.
-                
-                // Để đơn giản và tránh deadlock, ta unlock tạm thời
                 char winner_copy[32];
                 strncpy(winner_copy, match->black_player, 31);
                 winner_copy[31] = '\0';
@@ -596,13 +697,9 @@ void check_match_timeouts() {
                 pthread_mutex_unlock(&match_mutex);
                 send_game_result(i, winner_copy, "Timeout");
                 pthread_mutex_lock(&match_mutex);
-                
-                // Sau khi lock lại, match có thể đã thay đổi (dù khó xảy ra nếu single thread timeout)
-                // Nhưng send_game_result đã set is_active = 0, nên lần lặp sau sẽ skip
             }
         } else { // Black's turn
              if (match->black_time_remaining - elapsed <= 0) {
-                // Black timeouts -> White wins
                 char winner_copy[32];
                 strncpy(winner_copy, match->white_player, 31);
                 winner_copy[31] = '\0';

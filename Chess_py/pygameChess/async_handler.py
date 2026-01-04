@@ -32,11 +32,19 @@ class AsyncMessageHandler:
         self.rematch_declined = []
         self.matchmaking_status = []
         self.match_replay = [] # Queue for MATCH_REPLAY messages
-        self.profile_updates = [] # Queue for PROFILE_INFO/ERROR
+        self.reconnect_success = []  # Queue for RECONNECT_SUCCESS
+        self.reconnect_fail = []  # Queue for RECONNECT_FAIL
         self.other_messages = []
         
         # Lock for thread safety
         self.lock = threading.Lock()
+        
+        # Reconnect state
+        self.is_disconnected = False
+        self.reconnect_in_progress = False
+        self.reconnect_needed = False
+        self.consecutive_failures = 0
+        self.max_consecutive_failures = 3
     
     def start(self):
         """Start the async message polling thread"""
@@ -44,6 +52,9 @@ class AsyncMessageHandler:
             return
         
         self.running = True
+        self.is_disconnected = False
+        self.reconnect_needed = False
+        self.consecutive_failures = 0
         self.thread = threading.Thread(target=self._poll_loop, daemon=True)
         self.thread.start()
         print("[AsyncHandler] Started polling for async messages")
@@ -59,17 +70,76 @@ class AsyncMessageHandler:
         """Main polling loop (runs in background thread)"""
         while self.running:
             try:
+                # Check if we need to reconnect
+                if self.reconnect_needed and not self.reconnect_in_progress:
+                    self._attempt_reconnect()
+                    continue
+                
                 # Try to receive message with short timeout
                 message = self.network.receive_message(timeout=0.5)
                 
                 if message:
                     self._handle_async_message(message)
+                    self.consecutive_failures = 0  # Reset on success
+                else:
+                    # Check if connection is still alive
+                    if not self.network.check_alive() and self.network.last_session_id:
+                        self.consecutive_failures += 1
+                        if self.consecutive_failures >= self.max_consecutive_failures:
+                            print("[AsyncHandler] Connection lost, triggering reconnect...")
+                            self.is_disconnected = True
+                            self.reconnect_needed = True
                     
             except Exception as e:
                 print(f"[AsyncHandler] Error in poll loop: {e}")
+                self.consecutive_failures += 1
+                if self.consecutive_failures >= self.max_consecutive_failures:
+                    self.is_disconnected = True
+                    self.reconnect_needed = True
             
             # Small delay to avoid busy waiting
             time.sleep(0.1)
+    
+    def _attempt_reconnect(self):
+        """Attempt to reconnect to server"""
+        if self.reconnect_in_progress:
+            return
+        
+        self.reconnect_in_progress = True
+        print("[AsyncHandler] Attempting to reconnect...")
+        
+        try:
+            if self.network.reconnect_with_session():
+                print("[AsyncHandler] Reconnect request sent, waiting for response...")
+                # Wait for response
+                time.sleep(1)
+                response = self.network.receive_message(timeout=5.0)
+                if response:
+                    self._handle_async_message(response)
+                    if response.get("action") == "RECONNECT_SUCCESS":
+                        print("[AsyncHandler] Reconnect successful!")
+                        self.is_disconnected = False
+                        self.reconnect_needed = False
+                        self.consecutive_failures = 0
+                    else:
+                        print(f"[AsyncHandler] Reconnect failed: {response}")
+                        self.reconnect_needed = False  # Stop trying
+            else:
+                print("[AsyncHandler] Reconnect_with_session failed")
+                time.sleep(2)  # Wait before retrying
+        except Exception as e:
+            print(f"[AsyncHandler] Reconnect error: {e}")
+            time.sleep(2)
+        finally:
+            self.reconnect_in_progress = False
+    
+    def is_connection_lost(self):
+        """Check if connection was lost and needs reconnect"""
+        return self.is_disconnected
+    
+    def is_reconnecting(self):
+        """Check if reconnection is in progress"""
+        return self.reconnect_in_progress
     
     def _handle_async_message(self, message):
         """Handle an async message from server"""
@@ -143,12 +213,14 @@ class AsyncMessageHandler:
             elif action == "MATCHMAKING_STATUS":
                 self.matchmaking_status.append(data)
                 print(f"[AsyncHandler] Received matchmaking status: {data.get('status')}")
-
-            elif action == "PROFILE_INFO" or action == "PROFILE_ERROR":
-                # Combine action and data for profile updates
-                full_msg = {"action": action, "data": data}
-                self.profile_updates.append(full_msg)
-                print(f"[AsyncHandler] Received profile update: {action}")
+            
+            elif action == "RECONNECT_SUCCESS":
+                self.reconnect_success.append(data)
+                print(f"[AsyncHandler] Reconnect successful: {data.get('username')}")
+            
+            elif action == "RECONNECT_FAIL":
+                self.reconnect_fail.append(data)
+                print(f"[AsyncHandler] Reconnect failed: {data.get('reason')}")
                 
             else:
                 # Store other messages
@@ -258,10 +330,18 @@ class AsyncMessageHandler:
                 return self.matchmaking_status.pop(0)
         return None
     
-    def get_profile_update(self):
+    def get_reconnect_success(self):
+        """Get RECONNECT_SUCCESS response (if any)"""
         with self.lock:
-            if self.profile_updates:
-                return self.profile_updates.pop(0)
+            if self.reconnect_success:
+                return self.reconnect_success.pop(0)
+        return None
+    
+    def get_reconnect_fail(self):
+        """Get RECONNECT_FAIL response (if any)"""
+        with self.lock:
+            if self.reconnect_fail:
+                return self.reconnect_fail.pop(0)
         return None
     
     def has_pending_messages(self):
@@ -278,6 +358,8 @@ class AsyncMessageHandler:
                     len(self.draw_offered) > 0 or
                     len(self.abort_offered) > 0 or
                     len(self.rematch_offered) > 0 or
+                    len(self.reconnect_success) > 0 or
+                    len(self.reconnect_fail) > 0 or
                     len(self.other_messages) > 0)
     
     def clear_all(self):
@@ -298,4 +380,6 @@ class AsyncMessageHandler:
             self.rematch_offered.clear()
             self.rematch_declined.clear()
             self.matchmaking_status.clear()
+            self.reconnect_success.clear()
+            self.reconnect_fail.clear()
             self.other_messages.clear()
